@@ -409,6 +409,10 @@ restoreOverwrittenFilesWithOriginals().then(() => {
         res.status(400).send(res.__('Invalid email/password cannot be empty'))
       }
     }
+    if (req.body.role !== undefined && req.body.role === 'admin') {
+      res.status(400).send(res.__('Invalid role'))
+      return
+    }
     next()
   })
   app.post('/api/Users', verify.registerAdminChallenge())
