@@ -4,6 +4,8 @@
  */
 import { type Request, type Response, type NextFunction } from 'express'
 import config from 'config'
+// NOTE: You must install this library: npm install express-rate-limit
+import rateLimit from 'express-rate-limit' 
 
 import * as challengeUtils from '../lib/challengeUtils'
 import { challenges, users } from '../data/datacache'
@@ -13,6 +15,18 @@ import { UserModel } from '../models/user'
 import * as models from '../models/index'
 import { type User } from '../data/types'
 import * as utils from '../lib/utils'
+
+// New Ratelimiter to give ip-addresses 5 tries with logging in before letting them allow after 15 minutes again
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 login requests per windowMs
+  standardHeaders: true, // Return rate limit info in the headers
+  legacyHeaders: false, // Disable the X-Rate-Limit-* headers
+  message: {
+    status: 'error',
+    message: 'Too many login attempts from this IP, please try again after 15 minutes'
+  }
+})
 
 // vuln-code-snippet start loginAdminChallenge loginBenderChallenge loginJimChallenge
 export function login () {
@@ -28,8 +42,8 @@ export function login () {
         next(error)
       })
   }
-
-  return (req: Request, res: Response, next: NextFunction) => {
+  
+  const coreLoginMiddleware = (req: Request, res: Response, next: NextFunction) => {
     verifyPreLoginChallenges(req) // vuln-code-snippet hide-line
     models.sequelize.query(`SELECT * FROM Users WHERE email = '${req.body.email || ''}' AND password = '${security.hash(req.body.password || '')}' AND deletedAt IS NULL`, { model: UserModel, plain: true }) // vuln-code-snippet vuln-line loginAdminChallenge loginBenderChallenge loginJimChallenge
       .then((authenticatedUser) => { // vuln-code-snippet neutral-line loginAdminChallenge loginBenderChallenge loginJimChallenge
@@ -53,6 +67,19 @@ export function login () {
       }).catch((error: Error) => {
         next(error)
       })
+  }
+
+  // Return the Rate Limiter middleware followed by the core login middleware
+  return (req: Request, res: Response, next: NextFunction) => {
+    // Execute the rate limiter first
+    loginLimiter(req, res, (err) => {
+      if (err) {
+        // Handle rate limit error
+        return next(err) 
+      }
+      // If not rate limited, execute the core login logic
+      coreLoginMiddleware(req, res, next)
+    })
   }
   // vuln-code-snippet end loginAdminChallenge loginBenderChallenge loginJimChallenge
 
